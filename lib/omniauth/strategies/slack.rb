@@ -1,5 +1,5 @@
 require 'omniauth/strategies/oauth2'
-require 'uri'
+require 'omniauth-slack/response_adapters'
 require 'rack/utils'
 
 module OmniAuth
@@ -19,35 +19,10 @@ module OmniAuth
         param_name: 'token'
       }
 
-      uid { raw_info['user_id'] }
+      uid { response_adapter.uid }
 
       info do
-        hash = {
-          nickname: raw_info['user'],
-          team: raw_info['team'],
-          user: raw_info['user'],
-          team_id: raw_info['team_id'],
-          user_id: raw_info['user_id']
-        }
-
-        unless skip_info?
-          hash.merge!(
-            name: user_info['user'].to_h['profile'].to_h['real_name_normalized'],
-            email: user_info['user'].to_h['profile'].to_h['email'],
-            first_name: user_info['user'].to_h['profile'].to_h['first_name'],
-            last_name: user_info['user'].to_h['profile'].to_h['last_name'],
-            description: user_info['user'].to_h['profile'].to_h['title'],
-            image_24: user_info['user'].to_h['profile'].to_h['image_24'],
-            image_48: user_info['user'].to_h['profile'].to_h['image_48'],
-            image: user_info['user'].to_h['profile'].to_h['image_192'],
-            team_domain: team_info['team'].to_h['domain'],
-            is_admin: user_info['user'].to_h['is_admin'],
-            is_owner: user_info['user'].to_h['is_owner'],
-            time_zone: user_info['user'].to_h['tz']
-          )
-        end
-
-        hash
+        response_adapter.info(skip_info?)
       end
 
       extra do
@@ -68,7 +43,7 @@ module OmniAuth
       end
 
       def raw_info
-        @raw_info ||= access_token.get('/api/auth.test').parsed
+        response_adapter.raw_info
       end
 
       def authorize_params
@@ -82,15 +57,11 @@ module OmniAuth
       end
 
       def user_info
-        url = URI.parse("/api/users.info")
-        url.query = Rack::Utils.build_query(user: raw_info['user_id'])
-        url = url.to_s
-
-        @user_info ||= access_token.get(url).parsed
+        response_adapter.user_info
       end
 
       def team_info
-        @team_info ||= access_token.get('/api/team.info').parsed
+        response_adapter.team_info
       end
 
       def web_hook_info
@@ -101,6 +72,17 @@ module OmniAuth
       def bot_info
         return {} unless access_token.params.key? 'bot'
         access_token.params['bot']
+      end
+
+      def response_adapter
+        @response_adapter ||=
+          identity_scoped? ?
+            OmniAuth::Slack::IdentityScopedResponseAdapter.new(access_token) :
+            OmniAuth::Slack::AppScopedResponseAdapter.new(access_token)
+      end
+
+      def identity_scoped?
+        authorize_params[:scope] =~ /identity\.basic/
       end
     end
   end
